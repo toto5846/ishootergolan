@@ -1,39 +1,21 @@
 from gpiozero import PWMOutputDevice
 
 class DualDCMotorDriver:
-    def __init__(self, in1_pin, in2_pin, in3_pin, in4_pin):
-        # Motor A
-        self.motA1 = PWMOutputDevice(in1_pin)
-        self.motA2 = PWMOutputDevice(in2_pin)
-
-        # Motor B
-        self.motB1 = PWMOutputDevice(in3_pin)
-        self.motB2 = PWMOutputDevice(in4_pin)
-
+    def __init__(self, in1_pin, in2_pin, in3_pin, in4_pin, freq1=1000, freq2=1200):
+        self.motA1 = PWMOutputDevice(in1_pin, frequency=freq1)
+        self.motA2 = PWMOutputDevice(in2_pin, frequency=freq1)
+        self.motB1 = PWMOutputDevice(in3_pin, frequency=freq2)
+        self.motB2 = PWMOutputDevice(in4_pin, frequency=freq2)
         self.stop_all()
 
     def move_motor(self, motor, speed):
         pwm = min(max(abs(speed) / 100.0, 0.0), 1.0)
         if motor == "A":
-            if speed > 0:
-                self.motA1.value = pwm
-                self.motA2.value = 0
-            elif speed < 0:
-                self.motA1.value = 0
-                self.motA2.value = pwm
-            else:
-                self.motA1.value = 0
-                self.motA2.value = 0
+            self.motA1.value = pwm if speed > 0 else 0
+            self.motA2.value = pwm if speed < 0 else 0
         elif motor == "B":
-            if speed > 0:
-                self.motB1.value = pwm
-                self.motB2.value = 0
-            elif speed < 0:
-                self.motB1.value = 0
-                self.motB2.value = pwm
-            else:
-                self.motB1.value = 0
-                self.motB2.value = 0
+            self.motB1.value = pwm if speed > 0 else 0
+            self.motB2.value = pwm if speed < 0 else 0
 
     def move_both(self, speedA, speedB):
         self.move_motor("A", speedA)
@@ -44,9 +26,3 @@ class DualDCMotorDriver:
         self.motA2.value = 0
         self.motB1.value = 0
         self.motB2.value = 0
-
-    def hard_brake(self):
-        self.motA1.value = 1
-        self.motA2.value = 1
-        self.motB1.value = 1
-        self.motB2.value = 1
