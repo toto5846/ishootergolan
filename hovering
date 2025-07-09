@@ -1,0 +1,12 @@
+from time import sleep
+
+def hover_pattern(driver):
+
+    driver.move_both(60, -60)
+    sleep(6.5)
+    driver.stop_all()
+
+    driver.move_both(80, 80)
+    sleep(3)
+    driver.stop_all()
+
