@@ -1,0 +1,16 @@
+import sys
+sys.path.append('/home/tom')
+
+from motor_driver import DualDCMotorDriver
+from RPLCD.i2c import CharLCD
+from time import sleep
+import hovering  # Your hovering behavior module
+
+def set_lcd_hovering(lcd):
+    lcd.clear()
+    lcd.write_string("hovering")
+
+def hover(driver, lcd):
+    set_lcd_hovering(lcd)
+    while True:
+        hovering.hover_pattern(driver)
