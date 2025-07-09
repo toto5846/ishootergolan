@@ -1,0 +1,54 @@
+from time import sleep
+import sys
+sys.path.append('/home/tom')
+from motor_driver import DualDCMotorDriver
+
+class ManualMode:
+    def __init__(self, driver: DualDCMotorDriver, lcd):
+        self.driver = driver
+        self.lcd = lcd
+
+    def forward(self):
+        self.lcd.clear()
+        self.lcd.write_string("Moving Forward")
+        self.driver.move_both(100, 100)
+        sleep(2)
+        self.driver.stop_all()
+
+    def backward(self):
+        self.lcd.clear()
+        self.lcd.write_string("Moving Backward")
+        self.driver.move_both(-100, -100)  # Right motor doesn't reverse
+        sleep(2)
+        self.driver.stop_all()
+
+    def left(self):
+        self.lcd.clear()
+        self.lcd.write_string("Turning Left")
+        self.driver.move_both(0, 100)  # Spin using only left motor reverse + right forward
+        sleep(1.5)
+        self.driver.stop_all()
+
+    def right(self):
+        self.lcd.clear()
+        self.lcd.write_string("Turning Right")
+        self.driver.move_both(100, 0)  # Right motor off
+        sleep(1.5)
+        self.driver.stop_all()
+
+    def stop(self):
+        self.lcd.clear()
+        self.lcd.write_string("Stopped")
+        self.driver.stop_all()
+
+    def handle_action(self, action):
+        if action == "forward":
+            self.forward()
+        elif action == "backward":
+            self.backward()
+        elif action == "left":
+            self.left()
+        elif action == "right":
+            self.right()
+        elif action == "stop":
+            self.stop()
