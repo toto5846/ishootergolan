@@ -2,17 +2,13 @@ from gpiozero import Motor, Button
 import time
 
 class EV3Motor:
-    """
-    EV3Motor class using gpiozero.
-    Controls an EV3 motor with encoder feedback and proportional control.
-    Works with L298N Mini (PWM directly on IN1/IN2).
-    """
+
 
     def __init__(self, encoder1_pin, encoder2_pin, in1_pin, in2_pin):
-        # Motor pins (PWM on IN1/IN2)
+
         self.motor = Motor(forward=in2_pin, backward=in1_pin, pwm=True)
 
-        # Encoder pins
+       
         self.encoder1 = Button(encoder1_pin)
         self.encoder2 = Button(encoder2_pin)
 
@@ -30,10 +26,7 @@ class EV3Motor:
             self.degrees -= 1
 
     def motgo(self, speed):
-        """
-        Move motor at speed -100 to 100.
-        Applies minimum PWM of 0.4 to avoid dead zone.
-        """
+    
         speed = max(-100, min(100, speed))
         min_pwm = 0.4
         pwm_value = min_pwm + (1 - min_pwm) * abs(speed) / 100.0
@@ -46,16 +39,13 @@ class EV3Motor:
             self.motor.stop()
 
     def goto_degrees(self, clicks_to_move, kp=1.0, timeout=5.0):
-        """
-        Move motor a specific number of encoder clicks using proportional control.
-        Speed = kp * error, clamped and with min speed.
-        """
+
         start_pos = self.degrees
         target_pos = start_pos + clicks_to_move
         start_time = time.time()
 
-        min_speed = 10  # minimal speed so it moves even on small error
-        max_speed = 90  # max speed limit (less than 100 for smoothness)
+        min_speed = 10  
+        max_speed = 90  
 
         print(f"Moving motor {clicks_to_move} clicks with kp={kp}...")
 
@@ -68,16 +58,16 @@ class EV3Motor:
             if abs(error) < 1:  # close enough, stop
                 break
 
-            # proportional speed
+           
             speed = kp * error
 
-            # clamp max speed
+           
             if speed > max_speed:
                 speed = max_speed
             elif speed < -max_speed:
                 speed = -max_speed
 
-            # clamp min speed (if not zero)
+           
             if 0 < abs(speed) < min_speed:
                 speed = min_speed if speed > 0 else -min_speed
 
