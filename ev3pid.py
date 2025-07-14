@@ -28,7 +28,7 @@ class EV3Motor:
 
     def motgo(self, speed):
         speed = max(-100, min(100, speed))
-        min_pwm = 0.1  # נמוך כדי להבטיח תנועה
+        min_pwm = 0.1 
         pwm_value = min_pwm + (1 - min_pwm) * abs(speed) / 100.0
 
         if speed > 0:
@@ -45,8 +45,8 @@ class EV3Motor:
         self.integral = 0
         self.last_error = 0
 
-        max_speed = 10  # מהירות מקסימלית
-        min_speed = 7  # מהירות מינימום שתגרום לתנועה ממשית
+        max_speed = 10  
+        min_speed = 7 
 
         print(f"Moving motor {clicks_to_move} clicks with PID: kp={kp}, ki={ki}, kd={kd}")
 
@@ -61,23 +61,23 @@ class EV3Motor:
 
             error = target_pos - self.degrees
 
-            # תנאי עצירה רך
+           
             if abs(error) < 2:
                 break
 
-            # חישובי PID
+           
             self.integral += error * dt
             derivative = (error - self.last_error) / dt
 
             speed = kp * error + ki * self.integral + kd * derivative
 
-            # הגבלת מהירות מקסימום
+    
             if speed > max_speed:
                 speed = max_speed
             elif speed < -max_speed:
                 speed = -max_speed
 
-            # הגבלת מהירות מינימום (deadzone compensation)
+        
             if 0 < abs(speed) < min_speed:
                 speed = min_speed if speed > 0 else -min_speed
 
