@@ -79,3 +79,31 @@ class MPU6050:
         x = math.atan2(accel['y'], accel['z'])
         y = math.atan2(-accel['x'], accel['z'])
         return {'x': x, 'y': y}
+
+
+class PID:
+    def __init__(self, kp=1.0, ki=0.0, kd=0.0):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.last_error = 0.0
+        self.integral = 0.0
+        self.last_time = time.time()
+
+    def compute(self, setpoint, measurement):
+        error = setpoint - measurement
+        current_time = time.time()
+        dt = current_time - self.last_time if current_time != self.last_time else 1e-16
+        self.last_time = current_time
+
+        self.integral += error * dt
+        derivative = (error - self.last_error) / dt
+        self.last_error = error
+
+        output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
+        return output
+
+    def reset(self):
+        self.last_error = 0.0
+        self.integral = 0.0
+        self.last_time = time.time()
