@@ -1,0 +1,81 @@
+import smbus
+import time
+import math
+
+_GRAVITY_MS2 = 9.80665
+_GYRO_SENSITIVITY = 131.0
+
+class MPU6050:
+    def __init__(self, bus=1, address=0x68):
+        self.bus = smbus.SMBus(bus)
+        self.address = address
+        self.bias_x = 0
+        self.bias_y = 0
+        self.bias_z = 0
+        self.accel_bias_x = 0
+        self.accel_bias_y = 0
+        self.accel_bias_z = 0
+        self.angle_x = 0
+        self.angle_y = 0
+        self.angle_z = 0
+        self.last_time = time.time()
+        self._initialize_sensor()
+        self.calibrate_gyro()
+
+    def _initialize_sensor(self):
+        self.bus.write_byte_data(self.address, 0x6B, 0x00)
+
+    def _read_signed_16bit(self, register):
+        high = self.bus.read_byte_data(self.address, register)
+        low = self.bus.read_byte_data(self.address, register + 1)
+        value = (high << 8) | low
+        return value - 65536 if value >= 0x8000 else value
+
+    def read_gyro(self):
+        return {
+            'x': self._read_signed_16bit(0x43) / _GYRO_SENSITIVITY,
+            'y': self._read_signed_16bit(0x45) / _GYRO_SENSITIVITY,
+            'z': self._read_signed_16bit(0x47) / _GYRO_SENSITIVITY
+        }
+
+    def read_accel(self, g=False):
+        scale = 16384.0
+        raw = {
+            'x': self._read_signed_16bit(0x3B),
+            'y': self._read_signed_16bit(0x3D),
+            'z': self._read_signed_16bit(0x3F)
+        }
+        if g:
+            return {k: v / scale for k, v in raw.items()}
+        else:
+            return {k: v / scale * _GRAVITY_MS2 for k, v in raw.items()}
+
+    def calibrate_gyro(self, samples=100, delay=0.01):
+        total_x = 0
+        total_y = 0
+        total_z = 0
+        for _ in range(samples):
+            g = self.read_gyro()
+            total_x += g['x']
+            total_y += g['y']
+            total_z += g['z']
+            time.sleep(delay)
+        self.bias_x = total_x / samples
+        self.bias_y = total_y / samples
+        self.bias_z = total_z / samples
+
+    def update_angle(self):
+        current_time = time.time()
+        dt = current_time - self.last_time
+        self.last_time = current_time
+        g = self.read_gyro()
+        self.angle_x += (g['x'] - self.bias_x) * dt
+        self.angle_y += (g['y'] - self.bias_y) * dt
+        self.angle_z += (g['z'] - self.bias_z) * dt
+        return self.angle_x, self.angle_y, self.angle_z
+
+    def read_angles_from_accel(self):
+        accel = self.read_accel()
+        x = math.atan2(accel['y'], accel['z'])
+        y = math.atan2(-accel['x'], accel['z'])
+        return {'x': x, 'y': y}
