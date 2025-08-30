@@ -1,16 +1,201 @@
+# auto_mode.py
 import sys
-sys.path.append('/home/tom')
+import time
+from gpiozero import Button
+sys.path.append("/home/tom")
 
 from motor_driver import DualDCMotorDriver
-from RPLCD.i2c import CharLCD
-from time import sleep
-import hovering  # Your hovering behavior module
+from huskylib import HuskyLensLibrary
+from ev3motor import EV3Motor
+import gyro
+import hovering
 
-def set_lcd_hovering(lcd):
-    lcd.clear()
-    lcd.write_string("hovering")
+class AutoMode:
+    def __init__(self, driver, lcd, stop_flag_dict):
+        self.driver = driver
+        self.lcd = lcd
+        self.stop_flag_dict = stop_flag_dict
+        self.running = False
 
-def hover(driver, lcd):
-    set_lcd_hovering(lcd)
-    while True:
-        hovering.hover_pattern(driver)
+        # Face tracking parameters
+        self.target_x = 160
+        self.deadzone = 40
+        self.min_speed = 100
+        self.max_speed = 100
+
+        # Gun motor parameters
+        self.gun_button = Button(21)
+        self.gun_motor = EV3Motor(25, 8, 26, 20)
+        self.gun_motor.reset_encoder()
+        self.gun_initialized = False
+        self.gun_active = False
+
+        # Sensors
+        self.hl = None
+        self.gyro_available = False
+        self.offset_z = 0
+
+        # LCD
+        self.current_lcd_text = ""
+
+        self.init_huskylens()
+        self.init_gyro()
+
+    def init_huskylens(self):
+        try:
+            self.hl = HuskyLensLibrary("I2C", "", address=0x32)
+            self.hl.algorthim("ALGORITHM_FACE_RECOGNITION")
+            print("HuskyLens initialized")
+        except Exception as e:
+            print(f"! Camera error: {e}")
+
+    def init_gyro(self):
+        try:
+            if gyro.mpu_init():
+                print("Calibrating gyro...")
+                self.offset_z = gyro.calibrate_gyro()
+                self.gyro_available = True
+        except:
+            self.gyro_available = False
+
+    def get_face(self):
+        try:
+            result = self.hl.blocks()
+            if hasattr(result, 'x'):
+                return result
+            elif result and len(result) > 0:
+                return result[0]
+        except:
+            return None
+        return None
+
+    def calculate_movement(self, face):
+        error = self.target_x - face.x
+        if abs(error) <= self.deadzone:
+            return 0, 0
+
+        gyro_factor = 1.0
+        if self.gyro_available:
+            try:
+                gz = (gyro.robust_read(gyro.GYRO_XOUT_H + 4) / 131.0) - self.offset_z
+                gyro_factor = max(0.5, 1.0 - abs(gz)/150.0)
+            except:
+                pass
+
+        turn_speed = max(self.min_speed, min(self.max_speed, abs(error)/2)) * gyro_factor
+
+        if error > 0:
+            left, right = 0, turn_speed
+        else:
+            left, right = turn_speed, 0
+
+        return max(0, min(100, left)), max(0, min(100, right))
+
+    def initialize_gun_position(self):
+        """Move gun down to button position when auto mode starts"""
+        try:
+            print("Auto mode started - moving gun down to button position")
+            while not self.gun_button.is_pressed and self.running:
+                self.gun_motor.goto_degrees(-200, kp=0.5, ki=0.2, kd=0, timeout=5)
+                time.sleep(0.1)
+            if self.running:
+                print("Button pressed - gun in initial position")
+                self.gun_initialized = True
+        except Exception as e:
+            print(f"Error initializing gun position: {e}")
+
+    def gun_sequence(self):
+        """Move gun up 1300 degrees when face tracking starts"""
+        try:
+            if self.gun_initialized:
+                print("Face detected - moving gun up 1300 degrees")
+                self.gun_motor.goto_degrees(1300, kp=5, ki=0.2, kd=0, timeout=10)
+                print("Gun in firing position")
+        except Exception as e:
+            print(f"Error in gun sequence: {e}")
+        finally:
+            self.gun_active = False
+
+    def reset_gun_position(self):
+        """Smoothly reset gun to button position when face tracking stops"""
+        try:
+            if not self.gun_initialized:
+                return
+
+            print("Face tracking stopped - resetting gun to button position")
+            # Large smooth move to approximate button
+            self.gun_motor.goto_degrees(-200, kp=5, ki=0.2, kd=0, timeout=10)
+
+            # Fine-tune: just move down slowly until button pressed
+            while not self.gun_button.is_pressed and self.running:
+                self.gun_motor.goto_degrees(-210, kp=5, ki=0.1, kd=0, timeout=0.5)
+                time.sleep(0.05)
+
+            print("Gun reset to button position")
+        except Exception as e:
+            print(f"Error resetting gun position: {e}")
+
+    def update_lcd(self, text):
+        if text != self.current_lcd_text:
+            self.lcd.clear()
+            self.lcd.write_string(text)
+            self.current_lcd_text = text
+
+    def auto_worker(self):
+        last_face_time = 0.0
+        hover_delay = 4.0  # wait longer before hovering
+        was_tracking = False
+        face_lost_counter = 0
+        face_lost_threshold = 5  # number of frames before switching to hover
+
+        # Initialize gun at auto mode start
+        self.initialize_gun_position()
+
+        while self.running:
+            face = self.get_face()
+
+            if face:
+                last_face_time = time.time()
+                face_lost_counter = 0
+
+                if not was_tracking:
+                    self.driver.stop_all()
+                    self.update_lcd("Tracking Face")
+                    print("Switched to tracking mode")
+                    was_tracking = True
+
+                    # Start gun sequence when tracking begins
+                    if not self.gun_active and self.gun_initialized:
+                        self.gun_active = True
+                        self.gun_sequence()
+
+                left, right = self.calculate_movement(face)
+                self.driver.move_both(left, right)
+
+            else:
+                face_lost_counter += 1
+                if face_lost_counter >= face_lost_threshold and was_tracking:
+                    self.driver.stop_all()
+                    self.update_lcd("Hovering Mode")
+                    hovering.reset_hovering(self.driver, forward_duration=5.0)
+                    print("Switched to hovering mode")
+                    was_tracking = False
+
+                    if self.gun_initialized:
+                        self.reset_gun_position()
+
+                # Hover even when no face detected
+                if time.time() - last_face_time > hover_delay:
+                    hovering.hover_step(self.driver)
+
+            time.sleep(0.05)
+
+    def start(self):
+        self.running = True
+        self.auto_worker()  # single-threaded main loop
+
+    def stop(self):
+        self.running = False
+        self.driver.stop_all()
+        self.gun_motor.stop()
+        self.update_lcd("Stopped")
