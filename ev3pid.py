@@ -1,4 +1,3 @@
-
 from gpiozero import Motor, Button
 import time
 
@@ -45,8 +44,8 @@ class EV3Motor:
         self.integral = 0
         self.last_error = 0
 
-        max_speed = 10  
-        min_speed = 7 
+        max_speed = 40
+        min_speed = 20 
 
         print(f"Moving motor {clicks_to_move} clicks with PID: kp={kp}, ki={ki}, kd={kd}")
 
