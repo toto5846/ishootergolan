@@ -1,12 +1,160 @@
-from time import sleep
+# hovering.py
+import time
+import sys
+sys.path.append('/home/tom')
+import gyro
 
-def hover_pattern(driver):
 
-    driver.move_both(60, -60)
-    sleep(6.5)
-    driver.stop_all()
+def _clamp(v, lo, hi):
+    return lo if v < lo else hi if v > hi else v
 
-    driver.move_both(80, 80)
-    sleep(3)
-    driver.stop_all()
+
+class HoveringController:
+    """
+    Non-blocking hover controller that preserves the original behavior:
+    - PID-controlled ~360° turn (same gains and ranges you used)
+    - Straight movement with simple gyro correction (same gains)
+    It advances one small step per call to hover_step().
+    """
+    def __init__(self, driver, forward_duration=5.0):
+        self.driver = driver
+
+        if not gyro.mpu_init():
+            raise RuntimeError("Gyro initialization failed")
+
+        # Shared gyro state
+        self.offset_z = 0.0
+        self.angle_z = 0.0
+        self.last_time = time.time()
+
+        # State machine
+        self.state = "turn"         # "turn" -> "forward" -> "turn" ...
+        self.state_started_at = time.time()
+        self.forward_duration = forward_duration
+
+        # --- Turn (PID ~360°) params (same as your blocking version) ---
+        self.Kp_turn, self.Ki_turn, self.Kd_turn = 0.005, 0.0008, 0.002
+        self.target_angle = 358.0
+        self.min_turn_speed, self.max_turn_speed = 0.5, 1.0
+        self.integral = 0.0
+        self.prev_error = None
+        self.integral_min, self.integral_max = -200.0, 200.0
+
+        # --- Straight params (same as yours) ---
+        self.Kp_straight = 0.05
+        self.base_speed = 0.8
+
+        # Initial calibration & resets
+        self._reset_turn_pid()
+
+    # ----------------- low-level motor helpers -----------------
+
+    def stop_motors(self):
+        self.driver.stop_all()
+
+    def turn_robot(self, speed_0_1):
+        # Input 0..1 -> driver scale 25..80 as in your original code
+        pct = _clamp(speed_0_1 * 100.0, 25.0, 80.0)
+        # Slight bias left vs. right like you had (0.9 on left)
+        self.driver.move_both(pct * 0.9, -pct)
+
+    def move_forward(self, left_speed_0_1, right_speed_0_1):
+        # Map 0..1 -> -100..100 with your sign flip
+        left = _clamp(left_speed_0_1 * 100.0, -100.0, 100.0)
+        right = _clamp(right_speed_0_1 * 100.0, -100.0, 100.0)
+        # Your original had negatives here
+        self.driver.move_both(-left, -right)
+
+    # ----------------- state resets -----------------
+
+    def _recalibrate_gyro(self):
+        self.offset_z = gyro.calibrate_gyro()
+        self.angle_z = 0.0
+        self.last_time = time.time()
+
+    def _reset_turn_pid(self):
+        self._recalibrate_gyro()
+        self.integral = 0.0
+        self.prev_error = None
+        self.state = "turn"
+        self.state_started_at = time.time()
+
+    def _reset_forward(self):
+        self._recalibrate_gyro()
+        self.state = "forward"
+        self.state_started_at = time.time()
+
+    # ----------------- one step per call -----------------
+
+    def hover_step(self):
+        """
+        Advance the hover pattern by a single small step.
+        Call repeatedly (e.g., every 50ms) from your main loop.
+        """
+        now = time.time()
+        dt = max(0.001, now - self.last_time)
+        self.last_time = now
+
+        # Integrate gyro angle (same axis and offset as before)
+        gz = (gyro.robust_read(gyro.GYRO_XOUT_H + 4) / 131.0) - self.offset_z
+        self.angle_z += gz * dt
+
+        if self.state == "turn":
+            # PID to target ~358°
+            error = self.target_angle - self.angle_z
+            if error <= 0:
+                # Transition to forward
+                self.stop_motors()
+                self._reset_forward()
+                return
+
+            # PID terms
+            P = self.Kp_turn * error
+            self.integral = _clamp(self.integral + error * dt,
+                                   self.integral_min, self.integral_max)
+            I = self.Ki_turn * self.integral
+            D = 0.0 if self.prev_error is None else self.Kd_turn * ((error - self.prev_error) / dt)
+            self.prev_error = error
+
+            speed = _clamp(P + I + D, self.min_turn_speed, self.max_turn_speed)
+            self.turn_robot(speed)
+
+        elif self.state == "forward":
+            # Run straight for forward_duration with simple P correction
+            t = now - self.state_started_at
+            if t < self.forward_duration:
+                err = 0.0 - self.angle_z
+                correction = self.Kp_straight * err
+                left = _clamp(self.base_speed - correction, 0.3, 1.0)
+                right = _clamp(self.base_speed + correction, 0.3, 1.0)
+                self.move_forward(left, right)
+            else:
+                # Transition back to turn
+                self.stop_motors()
+                self._reset_turn_pid()
+
+
+# -------- Module-level helpers to match your previous usage --------
+
+_hover_controller = None
+
+def init_hovering(driver, forward_duration=5.0):
+    global _hover_controller
+    _hover_controller = HoveringController(driver, forward_duration=forward_duration)
+
+def hover_step(driver):
+    """Non-blocking. Safe to call frequently from the main loop."""
+    global _hover_controller
+    if _hover_controller is None:
+        init_hovering(driver)
+    _hover_controller.hover_step()
+
+def stop_hovering():
+    global _hover_controller
+    if _hover_controller:
+        _hover_controller.stop_motors()
+
+def reset_hovering(driver, forward_duration=5.0):
+    """Optional: force re-init on each entry to hover mode."""
+    init_hovering(driver, forward_duration=forward_duration)
 
