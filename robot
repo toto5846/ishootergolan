@@ -1,3 +1,4 @@
+# app.py
 import sys
 import threading
 from time import sleep
@@ -8,31 +9,21 @@ sys.path.append('/home/tom')
 from RPLCD.i2c import CharLCD
 from motor_driver import DualDCMotorDriver
 import manual_mode
-import hovering  
+import hovering
+from auto_mode import AutoMode  # <-- our new library
 
-
+# Initialize LCD and driver
 lcd = CharLCD('PCF8574', 0x27)
 lcd.clear()
-driver = DualDCMotorDriver(in1_pin=18, in2_pin=13, in3_pin=24, in4_pin=23)
-
+driver = DualDCMotorDriver(in1_pin=27, in2_pin=17, in3_pin=24, in4_pin=23)
 
 manual = manual_mode.ManualMode(driver, lcd)
 
 app = Flask(__name__)
 
-
 current_mode = "manual"
-hovering_thread = None
-stop_hovering = False
-
-def set_lcd_hovering():
-    lcd.clear()
-    lcd.write_string("Hovering Mode")
-
-def run_hovering():
-    set_lcd_hovering()
-    while not stop_hovering:
-        hovering.hover_pattern(driver)
+auto_thread = None
+stop_flag = {'stop': False}  # flag for AutoMode
 
 def update_lcd_mode():
     lcd.clear()
@@ -43,7 +34,7 @@ def update_lcd_mode():
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    global current_mode, hovering_thread, stop_hovering
+    global current_mode, auto_thread, stop_flag
 
     if request.method == "POST":
         if "mode" in request.form:
@@ -52,20 +43,24 @@ def index():
                 current_mode = new_mode
 
                 if current_mode == "auto":
+                    # Start AutoMode
                     update_lcd_mode()
-                    stop_hovering = False
-                    hovering_thread = threading.Thread(target=run_hovering)
-                    hovering_thread.start()
+                    stop_flag['stop'] = False
+                    auto_instance = AutoMode(driver, lcd, stop_flag)
+                    auto_thread = threading.Thread(target=auto_instance.start)
+                    auto_thread.start()
 
                 elif current_mode == "manual":
-                    stop_hovering = True
-                    if hovering_thread and hovering_thread.is_alive():
-                        hovering_thread.join()
-                    driver.stop_all()  
+                    # Stop AutoMode
+                    stop_flag['stop'] = True
+                    if auto_thread and auto_thread.is_alive():
+                        auto_thread.join()
+                    driver.stop_all()
                     update_lcd_mode()
 
             return redirect("/")
 
+        # Handle manual actions
         if current_mode == "manual":
             action = request.form.get("action")
             manual.handle_action(action)
@@ -73,5 +68,7 @@ def index():
     return render_template("index.html", mode=current_mode)
 
 if __name__ == "__main__":
-    update_lcd_mode()  
+    update_lcd_mode()
     app.run(host="0.0.0.0", port=5000)
+
+
